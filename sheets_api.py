@@ -1,11 +1,48 @@
+# sheets_api.py (Boshlanish qismi)
 import gspread
 import logging
 from datetime import datetime
-import itertools # Stokni guruhlash uchun
+import itertools
+import os
+import json # <-- JSON kutubxonasini qo'shing
 
-# config.py faylingizdan import qilingan deb faraz qilinadi
-from config import SHEET_NAME, SHEET_NAMES 
+# --- ENV VARIABLES dan yuklash ---
+SHEET_NAME = os.environ.get('SHEET_NAME')
+GSPREAD_CREDENTIALS_JSON = os.environ.get('GSPREAD_CREDENTIALS') # <-- YANGI: JSON matnini yuklash
 
+if not SHEET_NAME:
+    logging.error("SHEET_NAME atrof-muhit o'zgaruvchisi topilmadi.")
+
+# Sheets nomlari
+SHEET_NAMES = {
+    "SELLERS": "Sotuvchilar",
+    "PRODUCTS": "Mahsulotlar",
+    "STOCK": "Stok",
+    "SALES": "Savdolar"
+}
+
+# --- YORDAMCHI FUNKSIYA: JSON FAYLINI YARATISH ---
+def setup_gspread_credentials():
+    """GSPREAD_CREDENTIALS Env Variablesidan JSON faylini yaratadi."""
+    if GSPREAD_CREDENTIALS_JSON:
+        try:
+            # Agar fayl nomi kerak bo'lsa, 'service_account.json' ni ishlatish
+            file_path = 'service_account.json'
+            
+            # JSON stringni faylga yozish
+            with open(file_path, 'w') as f:
+                f.write(GSPREAD_CREDENTIALS_JSON)
+                
+            logging.info("service_account.json fayli ENV orqali yaratildi.")
+            return True
+        except Exception as e:
+            logging.error(f"Credentials JSONni yozishda xato: {e}")
+            return False
+    
+    if not os.path.exists('service_account.json'):
+         logging.warning("GSPREAD_CREDENTIALS ENV va service_account.json fayli topilmadi.")
+         return False
+    return True
 
 # ==============================================================================
 # I. UMUMIY YORDAMCHI FUNKSIYALAR
@@ -13,14 +50,23 @@ from config import SHEET_NAME, SHEET_NAMES
 
 def get_sheets_client():
     """Google Sheetsga ulanish. Agar xato bo'lsa None qaytaradi."""
+    if not SHEET_NAME: return None
+    
+    # 1. Credentialsni o'rnatishni bir marta tekshirish (yoki run.py da chaqirish kerak)
+    if not setup_gspread_credentials():
+        return None
+        
     try:
-        # 'service_account.json' faylini loyiha papkasiga joylash shart.
+        # Endi gspread.service_account 'service_account.json' ni topadi
         gc = gspread.service_account(filename='service_account.json')
-        # Bu yerda SHEETS_NAME o'rniga SPREADSHEET ID yoki link ishlatiladi.
         return gc.open_by_key(SHEET_NAME) 
     except Exception as e:
         logging.error(f"Google Sheetsga ulanishda xato: {e}")
         return None
+        
+# ... Qolgan kod o'zgarmaydi ...
+
+# ... Qolgan kod o'zgarmaydi ...
 
 def get_or_create_worksheet(spreadsheet, sheet_name, header_row):
     """Varaqni (worksheet) topadi, topilmasa, uni sarlavha qatori bilan yaratadi."""
