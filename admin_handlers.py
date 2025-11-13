@@ -1,10 +1,14 @@
-# admin_handlers.py
+# admin_handlers.py (Boshlanish qismi)
 from aiogram import Dispatcher, types, F
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from config import ADMIN_ID
+# --- TUZATISH: config.py o'rniga os dan foydalanish ---
+# from config import ADMIN_ID # Bu qatorni o'chiring
+import os # os kutubxonasini qo'shing
+# --------------------------------------------------------
+
 import sheets_api
 import logging
 
@@ -28,8 +32,15 @@ class StockIssueForm(StatesGroup):
 # --- II. ASOSIY NAVIGATSIYA (START) BO'LIMI ---
 
 # Yordamchi funksiya: Ruxsatni tekshirish
+# --- II. ASOSIY NAVIGATSIYA (START) BO'LIMI ---
+
+# Yordamchi funksiya: Ruxsatni tekshirish
 def is_admin(user_id):
-    return user_id == ADMIN_ID
+    # ADMIN_IDS ro'yxati Env Variablesdan olinadi (run.py da o'rnatilgan). 
+    # Xavfsizlik uchun, har safar tekshirish yaxshi.
+    admin_ids_str = os.environ.get('ADMIN_IDS', '').split(',')
+    admin_ids = [int(i.strip()) for i in admin_ids_str if i.strip().isdigit()]
+    return user_id in admin_ids
 
 @CommandStart()
 async def command_start_handler(message: types.Message):
@@ -419,12 +430,48 @@ def setup_admin_handlers(dp: Dispatcher):
     dp.callback_query.register(list_all_sellers, F.data == "list_all_sellers")
     dp.callback_query.register(view_seller_details, F.data.startswith("view_seller:"))
     dp.callback_query.register(view_single_password, F.data.startswith("seller_password_view:"))
+
+    dp.callback_query.register(view_seller_stock, F.data.startswith("seller_stock:"))
     
     # Tovar Berish (Stock Issue)
     dp.callback_query.register(start_issue_stock, F.data.startswith("issue_stock:"))
     dp.message.register(process_stock_name, StockIssueForm.waiting_for_product_name)
     dp.message.register(process_new_product_price, StockIssueForm.waiting_for_new_product_price)
     dp.message.register(process_stock_quantity, StockIssueForm.waiting_for_quantity)
+
+# admin_handlers.py da: Qo'shilgan yangi funksiya
+
+@F.data.startswith("seller_stock:")
+async def view_seller_stock(callback: types.CallbackQuery):
+    """Sotuvchining jami stokini Sheetsdan olib chiqarish."""
+    if not is_admin(callback.from_user.id): return
+    
+    seller_sheet_id = callback.data.split(":")[1]
+    
+    # ------------------------------------------------------------
+    # sheets_api dan sotuvchi stokini olish
+    grouped_stock = sheets_api.get_seller_stock(seller_sheet_id)
+    seller_data = sheets_api.get_seller_by_id(seller_sheet_id)
+    seller_name = seller_data[2] if seller_data else "Noma'lum sotuvchi"
+    # ------------------------------------------------------------
+
+    if grouped_stock:
+        response_text = f"🛍️ **{seller_name}** dagi Jami Stok:\n\n"
+        
+        # Stokdagi har bir mahsulotni hisoblab chiqarish
+        for product_id, (quantity, price) in grouped_stock.items():
+            # Mahsulot IDsi orqali nomini olish
+            product_name = sheets_api.get_product_name_by_id(product_id) 
+            
+            response_text += f"**{product_name}**:\n"
+            response_text += f"   - Soni: `{quantity}` dona\n"
+            response_text += f"   - Narxi: `{price}` so'm\n"
+            
+        await callback.message.answer(response_text, parse_mode="Markdown")
+    else:
+        await callback.message.answer(f"**{seller_name}** hisobida hozircha tovarlar mavjud emas.")
+
+    await callback.answer()
     
     # Yangi sotuvchilar funksiyalari shu yerga qo'shiladi...
 
