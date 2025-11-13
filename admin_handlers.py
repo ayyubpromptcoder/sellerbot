@@ -19,6 +19,12 @@ class SellerForm(StatesGroup):
     waiting_for_phone = State()
     waiting_for_password = State()
 
+class StockIssueForm(StatesGroup):
+    """Sotuvchiga tovar berish jarayonining holatlari."""
+    waiting_for_product_name = State() # Tovar nomi
+    waiting_for_new_product_price = State() # Tovar yangi bo'lsa, narxi
+    waiting_for_quantity = State() # Tovar soni
+
 # --- II. ASOSIY NAVIGATSIYA (START) BO'LIMI ---
 
 # Yordamchi funksiya: Ruxsatni tekshirish
@@ -175,8 +181,217 @@ async def process_seller_password(message: types.Message, state: FSMContext):
 
     await state.clear()
 
+# admin_handlers.py da: IV. SOTUVCHILAR BO'LIMI MANTIQI
+
+@F.data.startswith("issue_stock:")
+async def start_issue_stock(callback: types.CallbackQuery, state: FSMContext):
+    """Sotuvchiga tovar berish jarayonini boshlash."""
+    if not is_admin(callback.from_user.id): return
+    
+    # callback_data dan sotuvchi ID sini ajratib olish
+    seller_sheet_id = callback.data.split(":")[1]
+    
+    # Joriy sotuvchi ID sini FSM ga saqlash
+    await state.update_data(current_seller_id=seller_sheet_id)
+    
+    await callback.message.answer("Sotuvchiga beriladigan **Tovar Nomini** kiriting:")
+    await state.set_state(StockIssueForm.waiting_for_product_name)
+    await callback.answer()
+
+@StockIssueForm.waiting_for_product_name
+async def process_stock_name(message: types.Message, state: FSMContext):
+    """Tovar nomini qabul qilish va bazada tekshirish."""
+    
+    product_name = message.text.strip()
+    
+    # ------------------------------------------------------------
+    # sheets_api dan mahsulotni ism bo'yicha topish
+    product_data = sheets_api.get_product_by_name(product_name) 
+    # ------------------------------------------------------------
+    
+    await state.update_data(current_product_name=product_name)
+    
+    if product_data:
+        # Mahsulot bazada mavjud (Narxni so'ramaymiz)
+        await state.update_data(product_id=product_data[0]) # IDni saqlash
+        await state.update_data(product_price=product_data[2]) # Narxni saqlash
+        await message.answer(f"Mahsulot bazadan topildi. Narxi: **{product_data[2]}** so'm.\n"
+                             f"Endi bu mahsulotning **Sonini (miqdorini)** kiriting:")
+        await state.set_state(StockIssueForm.waiting_for_quantity)
+        
+    else:
+        # Mahsulot bazada mavjud emas (Narxni so'rash kerak)
+        await message.answer(f"Mahsulot bazadan topilmadi. '{product_name}' ni yangi mahsulot sifatida qo'shish uchun **Narxini (faqat raqamda)** kiriting:")
+        await state.set_state(StockIssueForm.waiting_for_new_product_price)
+
+
+@StockIssueForm.waiting_for_new_product_price
+async def process_new_product_price(message: types.Message, state: FSMContext):
+    """Yangi mahsulot narxini qabul qilish va uni Sheetsga qo'shish."""
+    try:
+        new_price = float(message.text)
+    except ValueError:
+        await message.answer("Narx noto'g'ri kiritildi. Iltimos, faqat raqam kiriting:")
+        return
+
+    user_data = await state.get_data()
+    product_name = user_data.get('current_product_name')
+    
+    # ------------------------------------------------------------
+    # Yangi mahsulotni Sheetsga qo'shish
+    product_id = sheets_api.add_product_and_get_id(product_name, new_price) 
+    # ------------------------------------------------------------
+
+    if product_id:
+        # ID ni saqlab, Sonini so'rashga o'tish
+        await state.update_data(product_id=product_id)
+        await state.update_data(product_price=new_price)
+        await message.answer(f"✅ Yangi mahsulot **{product_name}** narxi **{new_price}** so'm bilan bazaga kiritildi.\n"
+                             f"Endi bu mahsulotning **Sonini (miqdorini)** kiriting:")
+        await state.set_state(StockIssueForm.waiting_for_quantity)
+    else:
+        await message.answer("⚠️ Mahsulotni Sheetsga yozishda xato yuz berdi. Jarayon bekor qilindi.")
+        await state.clear()
+
+
+@StockIssueForm.waiting_for_quantity
+async def process_stock_quantity(message: types.Message, state: FSMContext):
+    """Tovar sonini qabul qilish va Sotuvchi hisobiga yozish."""
+    try:
+        quantity = int(message.text)
+        if quantity <= 0: raise ValueError
+    except ValueError:
+        await message.answer("Miqdor noto'g'ri kiritildi. Iltimos, musbat butun son kiriting:")
+        return
+        
+    user_data = await state.get_data()
+    seller_id = user_data.get('current_seller_id')
+    product_id = user_data.get('product_id')
+    product_name = user_data.get('current_product_name')
+    price = user_data.get('product_price')
+
+    # ------------------------------------------------------------
+    # Sotuvchi hisobiga tovar qo'shish
+    if sheets_api.add_stock_to_seller(seller_id, product_id, quantity, price):
+        await message.answer(f"✅ Sotuvchiga tovar berildi!\n"
+                             f"Tovar: **{product_name}**\n"
+                             f"Soni: **{quantity}** dona\n"
+                             f"Narxi: **{price}** so'm", parse_mode="Markdown")
+    else:
+        await message.answer("⚠️ Tovar berishda xato yuz berdi. Konsolni tekshiring.")
+        
+    await state.clear()
+
+# admin_handlers.py da: IV. SOTUVCHILAR BO'LIMI MANTIQI (Parollar va Ro'yxatlar)
+
+# B. Sotuvchilar Ro'yxati va Parollar Mantiqi
+
+@F.data == "list_all_sellers_menu"
+async def list_all_sellers_menu(callback: types.CallbackQuery):
+    """Sotuvchilar ro'yxati uchun ichki menyuni chiqarish."""
+    if not is_admin(callback.from_user.id): return
+
+    sellers_menu_keyboard = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [types.InlineKeyboardButton(text="👥 Barcha Sotuvchilar", callback_data="list_all_sellers")],
+            [types.InlineKeyboardButton(text="🗺️ Mahalla Bo'yicha", callback_data="list_sellers_by_region")],
+            [types.InlineKeyboardButton(text="🔑 Sotuvchilar Parollari", callback_data="list_all_passwords")]
+        ]
+    )
+    await callback.message.edit_text("Sotuvchilar ro'yxati variantlari:", reply_markup=sellers_menu_keyboard)
+    await callback.answer()
+
+@F.data == "list_all_passwords"
+async def list_all_passwords(callback: types.CallbackQuery):
+    """Barcha sotuvchilarning parollarini chiqarish."""
+    if not is_admin(callback.from_user.id): return
+    
+    sellers = sheets_api.get_all_sellers()
+    
+    if sellers:
+        response_text = "🔑 **Barcha Sotuvchilar Parollari:**\n\n"
+        for row in sellers:
+            if len(row) >= 6:
+                name = row[2]
+                password = row[5]
+                response_text += f"*{name}*: `{password}`\n"
+
+        await callback.message.answer(response_text, parse_mode="Markdown")
+    else:
+        await callback.message.answer("Sotuvchilar bazasi bo'sh.")
+    await callback.answer()
+
+
+@F.data == "list_all_sellers"
+async def list_all_sellers(callback: types.CallbackQuery):
+    """Barcha sotuvchilarni alifbo tartibida Inline Button sifatida chiqarish."""
+    if not is_admin(callback.from_user.id): return
+    
+    sellers = sheets_api.get_all_sellers()
+    
+    if sellers:
+        # Ism bo'yicha saralash
+        sellers.sort(key=lambda x: x[2]) 
+        
+        keyboard_rows = []
+        for seller in sellers:
+            seller_id = seller[0] 
+            seller_name = seller[2]
+            keyboard_rows.append([types.InlineKeyboardButton(text=seller_name, callback_data=f"view_seller:{seller_id}")])
+
+        all_sellers_keyboard = types.InlineKeyboardMarkup(inline_keyboard=keyboard_rows)
+        await callback.message.edit_text("👥 **Barcha Sotuvchilar Ro'yxati (Alifbo bo'yicha):**", reply_markup=all_sellers_keyboard)
+    else:
+        await callback.message.answer("Sotuvchilar bazasi bo'sh.")
+    await callback.answer()
+
+
+@F.data.startswith("view_seller:")
+async def view_seller_details(callback: types.CallbackQuery):
+    """Tanlangan sotuvchi uchun maxsus menyu chiqarish."""
+    if not is_admin(callback.from_user.id): return
+    
+    seller_sheet_id = callback.data.split(":")[1]
+    seller_data = sheets_api.get_seller_by_id(seller_sheet_id) 
+
+    if not seller_data:
+        await callback.message.answer("Sotuvchi topilmadi.")
+        return
+        
+    seller_name = seller_data[2]
+    
+    seller_details_keyboard = types.InlineKeyboardMarkup(
+        inline_keyboard=[
+            [types.InlineKeyboardButton(text="🛍️ Mahsulotlari va Narxlari", callback_data=f"seller_stock:{seller_sheet_id}")],
+            [types.InlineKeyboardButton(text="➕ Sotuvchiga Yangi Tovar Berish", callback_data=f"issue_stock:{seller_sheet_id}")],
+            [types.InlineKeyboardButton(text="🔑 Sotuvchi Paroli", callback_data=f"seller_password_view:{seller_sheet_id}")]
+        ]
+    )
+    
+    await callback.message.edit_text(f"**Sotuvchi: {seller_name}** uchun amallar:", reply_markup=seller_details_keyboard, parse_mode="Markdown")
+    await callback.answer()
+    
+
+@F.data.startswith("seller_password_view:")
+async def view_single_password(callback: types.CallbackQuery):
+    """Tanlangan sotuvchining parolini chiqarish."""
+    if not is_admin(callback.from_user.id): return
+    seller_sheet_id = callback.data.split(":")[1]
+    
+    seller_data = sheets_api.get_seller_by_id(seller_sheet_id) 
+    
+    if seller_data and len(seller_data) >= 6:
+        name = seller_data[2]
+        password = seller_data[5]
+        await callback.message.answer(f"**{name}** ning paroli: `{password}`", parse_mode="Markdown")
+    else:
+        await callback.message.answer("Sotuvchi topilmadi yoki ma'lumot bazasida xato.")
+
+    await callback.answer()
 
 # --- V. HANDLERLARNI ULASH FUNKSIYASI ---
+
+# admin_handlers.py da: V. HANDLERLARNI ULASH FUNKSIYASI
 
 def setup_admin_handlers(dp: Dispatcher):
     """Barcha admin handlerlarini Dispatcher ga ro'yxatdan o'tkazish."""
@@ -190,12 +405,27 @@ def setup_admin_handlers(dp: Dispatcher):
     dp.message.register(process_product_name, ProductForm.waiting_for_product_name)
     dp.message.register(process_product_price, ProductForm.waiting_for_product_price)
     
-    # Sotuvchilar
+    # Sotuvchilar (Menyu va Yangi Sotuvchi)
     dp.message.register(handle_sotuvchi, F.text == "/sotuvchi")
     dp.callback_query.register(start_add_seller, F.data == "add_new_seller")
     dp.message.register(process_seller_name, SellerForm.waiting_for_name)
     dp.message.register(process_seller_region, SellerForm.waiting_for_region)
     dp.message.register(process_seller_phone, SellerForm.waiting_for_phone)
     dp.message.register(process_seller_password, SellerForm.waiting_for_password)
+
+    # Sotuvchilar Ro'yxati Navigatsiyasi (Yangi Qo'shilganlar)
+    dp.callback_query.register(list_all_sellers_menu, F.data == "list_all_sellers_menu")
+    dp.callback_query.register(list_all_passwords, F.data == "list_all_passwords")
+    dp.callback_query.register(list_all_sellers, F.data == "list_all_sellers")
+    dp.callback_query.register(view_seller_details, F.data.startswith("view_seller:"))
+    dp.callback_query.register(view_single_password, F.data.startswith("seller_password_view:"))
+    
+    # Tovar Berish (Stock Issue)
+    dp.callback_query.register(start_issue_stock, F.data.startswith("issue_stock:"))
+    dp.message.register(process_stock_name, StockIssueForm.waiting_for_product_name)
+    dp.message.register(process_new_product_price, StockIssueForm.waiting_for_new_product_price)
+    dp.message.register(process_stock_quantity, StockIssueForm.waiting_for_quantity)
     
     # Yangi sotuvchilar funksiyalari shu yerga qo'shiladi...
+
+
