@@ -292,3 +292,36 @@ def get_seller_stock(seller_id):
     except Exception as e:
         logging.error(f"Sotuvchi stokini olishda xato: {e}")
         return None
+
+# sheets_api.py da: V. SAVDO (SALES) FUNKSIYALARI (Yangi bo'lim)
+
+def add_sale(seller_id, product_id, quantity, price):
+    """Sotilgan tovarni Sheetsdagi SALES varag'iga yozadi."""
+    spreadsheet = get_sheets_client()
+    if not spreadsheet: return False
+    
+    try:
+        worksheet = get_or_create_worksheet(
+            spreadsheet, 
+            SHEET_NAMES["SALES"], 
+            header_row=["ID", "Sana", "Sotuvchi ID", "Mahsulot ID", "Soni", "Birlik Narxi", "Jami Tushum"]
+        )
+        
+        total_price = float(price) * int(quantity)
+        current_date = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        new_row = [
+            "", # ID
+            current_date,
+            seller_id, 
+            product_id, 
+            quantity, 
+            price, 
+            total_price
+        ]
+        
+        worksheet.append_row(new_row)
+        return True
+    except Exception as e:
+        logging.error(f"Savdo ma'lumotini yozishda xato: {e}")
+        return False
