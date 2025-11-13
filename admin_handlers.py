@@ -12,6 +12,13 @@ import os # os kutubxonasini qo'shing
 import sheets_api
 import logging
 
+from aiogram import Dispatcher, types, F, Router # Router ni import qiling
+from aiogram.filters import CommandStart
+# ... qolgan importlar ...
+
+# Routerni e'lon qilish
+admin_router = Router()
+
 # --- I. FSM HOLATLARI BO'LIMI ---
 class ProductForm(StatesGroup):
     waiting_for_product_name = State()
@@ -29,8 +36,6 @@ class StockIssueForm(StatesGroup):
     waiting_for_new_product_price = State() # Tovar yangi bo'lsa, narxi
     waiting_for_quantity = State() # Tovar soni
 
-# --- II. ASOSIY NAVIGATSIYA (START) BO'LIMI ---
-
 # Yordamchi funksiya: Ruxsatni tekshirish
 # --- II. ASOSIY NAVIGATSIYA (START) BO'LIMI ---
 
@@ -46,6 +51,7 @@ def is_admin(user_id):
 # ... boshqa funksiyalar va FSMlar
 
 # @CommandStart() # DEKORATORNI O'CHIRDIK!
+@admin_router.message(CommandStart())
 async def command_start_handler(message: types.Message):
     """/start buyrug'i uchun ishlov beruvchi."""
     if not is_admin(message.from_user.id):
@@ -68,11 +74,11 @@ async def command_start_handler(message: types.Message):
 
 # --- III. MAHSULOTLAR BO'LIMI MANTIQI ---
 
-@F.text == "/mahsulot"
+@admin_router.message(F.text == "/mahsulot")
 async def handle_mahsulot(message: types.Message):
     """/mahsulot buyrug'i uchun ishlov beruvchi."""
     if not is_admin(message.from_user.id): return
-
+    # ... qolgan mantiq
     mahsulot_keyboard = types.InlineKeyboardMarkup(
         inline_keyboard=[
             [types.InlineKeyboardButton(text="📋 Mahsulotlar Ro'yxati", callback_data="list_products")],
@@ -81,8 +87,9 @@ async def handle_mahsulot(message: types.Message):
     )
     await message.answer("Mahsulotlar bo'limi:", reply_markup=mahsulot_keyboard)
 
-@F.data == "list_products"
+@admin_router.callback_query(F.data == "list_products")
 async def list_products(callback: types.CallbackQuery):
+    # ... funksiya mantiqi ...
     """Mahsulotlar ro'yxatini Sheetsdan olib chiqarish."""
     if not is_admin(callback.from_user.id): return
 
@@ -99,21 +106,20 @@ async def list_products(callback: types.CallbackQuery):
 
     await callback.answer()
 
-# Yangi Mahsulot Kiritish funksiyalari (FSM)
-@F.data == "add_new_product"
+@admin_router.callback_query(F.data == "add_new_product") # <-- BU QATORNI QO'SHING
 async def start_add_product(callback: types.CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id): return
     await callback.message.answer("Yangi mahsulot nomini kiriting:")
     await state.set_state(ProductForm.waiting_for_product_name)
     await callback.answer()
 
-@ProductForm.waiting_for_product_name
+@admin_router.message(ProductForm.waiting_for_product_name)
 async def process_product_name(message: types.Message, state: FSMContext):
     await state.update_data(product_name=message.text)
     await message.answer(f"'{message.text}' uchun narxni (faqat raqamda) kiriting:")
     await state.set_state(ProductForm.waiting_for_product_price)
 
-@ProductForm.waiting_for_product_price
+@admin_router.message(ProductForm.waiting_for_product_price)
 async def process_product_price(message: types.Message, state: FSMContext):
     try:
         price = float(message.text)
@@ -136,7 +142,7 @@ async def process_product_price(message: types.Message, state: FSMContext):
 
 # --- IV. SOTUVCHILAR BO'LIMI MANTIQI ---
 
-@F.text == "/sotuvchi"
+@admin_router.message(F.text == "/sotuvchi")
 async def handle_sotuvchi(message: types.Message):
     """/sotuvchi buyrug'i uchun ishlov beruvchi."""
     if not is_admin(message.from_user.id): return
@@ -151,38 +157,39 @@ async def handle_sotuvchi(message: types.Message):
     await message.answer("Sotuvchilar bo'limi:", reply_markup=sotuvchi_keyboard)
 
 
-# A. Yangi Sotuvchi Qo'shish Mantiqi (FSM) - O'zgarmas
+# A. Yangi Sotuvchi Qo'shish Mantiqi (FSM) - O'zgartirishlar
 
-@F.data == "add_new_seller"
+@admin_router.callback_query(F.data == "add_new_seller") # <- O'zgardi
 async def start_add_seller(callback: types.CallbackQuery, state: FSMContext):
     if not is_admin(callback.from_user.id): return
     await callback.message.answer("Yangi sotuvchining **Ismi/Familiyasini** kiriting:")
     await state.set_state(SellerForm.waiting_for_name)
     await callback.answer()
 
-@SellerForm.waiting_for_name
+@admin_router.message(SellerForm.waiting_for_name) # <- O'zgardi
 async def process_seller_name(message: types.Message, state: FSMContext):
     await state.update_data(seller_name=message.text)
     await message.answer("Sotuvchining **Mahallasini** kiriting:")
     await state.set_state(SellerForm.waiting_for_region)
 
-@SellerForm.waiting_for_region
+@admin_router.message(SellerForm.waiting_for_region) # <- O'zgardi
 async def process_seller_region(message: types.Message, state: FSMContext):
     await state.update_data(seller_region=message.text)
     await message.answer("Sotuvchining **Telefon nomerini** kiriting:")
     await state.set_state(SellerForm.waiting_for_phone)
     
-@SellerForm.waiting_for_phone
+@admin_router.message(SellerForm.waiting_for_phone) # <- O'zgardi
 async def process_seller_phone(message: types.Message, state: FSMContext):
     await state.update_data(seller_phone=message.text)
     await message.answer("Sotuvchi uchun maxsus **Parol**ni kiriting (bu ulanish uchun kalit bo'ladi):")
     await state.set_state(SellerForm.waiting_for_password)
 
-@SellerForm.waiting_for_password
+@admin_router.message(SellerForm.waiting_for_password) # <- O'zgardi
 async def process_seller_password(message: types.Message, state: FSMContext):
     if len(message.text) < 4:
-         await message.answer("Parol juda qisqa. Kamida 4 belgidan iborat parol kiriting:")
-         return
+        await message.answer("Parol juda qisqa. Kamida 4 belgidan iborat parol kiriting:")
+        return
+    # ... funksiya mantiqining qolgan qismi ...
          
     await state.update_data(seller_password=message.text)
     user_data = await state.get_data()
@@ -199,7 +206,7 @@ async def process_seller_password(message: types.Message, state: FSMContext):
 
 # admin_handlers.py da: IV. SOTUVCHILAR BO'LIMI MANTIQI
 
-@F.data.startswith("issue_stock:")
+@admin_router.callback_query(F.data.startswith("issue_stock:"))
 async def start_issue_stock(callback: types.CallbackQuery, state: FSMContext):
     """Sotuvchiga tovar berish jarayonini boshlash."""
     if not is_admin(callback.from_user.id): return
@@ -214,7 +221,7 @@ async def start_issue_stock(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(StockIssueForm.waiting_for_product_name)
     await callback.answer()
 
-@StockIssueForm.waiting_for_product_name
+@admin_router.message(StockIssueForm.waiting_for_product_name)
 async def process_stock_name(message: types.Message, state: FSMContext):
     """Tovar nomini qabul qilish va bazada tekshirish."""
     
@@ -241,7 +248,7 @@ async def process_stock_name(message: types.Message, state: FSMContext):
         await state.set_state(StockIssueForm.waiting_for_new_product_price)
 
 
-@StockIssueForm.waiting_for_new_product_price
+@admin_router.message(StockIssueForm.waiting_for_new_product_price)
 async def process_new_product_price(message: types.Message, state: FSMContext):
     """Yangi mahsulot narxini qabul qilish va uni Sheetsga qo'shish."""
     try:
@@ -270,7 +277,7 @@ async def process_new_product_price(message: types.Message, state: FSMContext):
         await state.clear()
 
 
-@StockIssueForm.waiting_for_quantity
+@admin_router.message(StockIssueForm.waiting_for_quantity)
 async def process_stock_quantity(message: types.Message, state: FSMContext):
     """Tovar sonini qabul qilish va Sotuvchi hisobiga yozish."""
     try:
@@ -302,7 +309,7 @@ async def process_stock_quantity(message: types.Message, state: FSMContext):
 
 # B. Sotuvchilar Ro'yxati va Parollar Mantiqi
 
-@F.data == "list_all_sellers_menu"
+@admin_router.callback_query(F.data == "list_all_sellers_menu")
 async def list_all_sellers_menu(callback: types.CallbackQuery):
     """Sotuvchilar ro'yxati uchun ichki menyuni chiqarish."""
     if not is_admin(callback.from_user.id): return
@@ -317,7 +324,7 @@ async def list_all_sellers_menu(callback: types.CallbackQuery):
     await callback.message.edit_text("Sotuvchilar ro'yxati variantlari:", reply_markup=sellers_menu_keyboard)
     await callback.answer()
 
-@F.data == "list_all_passwords"
+@admin_router.callback_query(F.data == "list_all_passwords")
 async def list_all_passwords(callback: types.CallbackQuery):
     """Barcha sotuvchilarning parollarini chiqarish."""
     if not is_admin(callback.from_user.id): return
@@ -338,7 +345,7 @@ async def list_all_passwords(callback: types.CallbackQuery):
     await callback.answer()
 
 
-@F.data == "list_all_sellers"
+@admin_router.callback_query(F.data == "list_all_sellers")
 async def list_all_sellers(callback: types.CallbackQuery):
     """Barcha sotuvchilarni alifbo tartibida Inline Button sifatida chiqarish."""
     if not is_admin(callback.from_user.id): return
@@ -362,7 +369,7 @@ async def list_all_sellers(callback: types.CallbackQuery):
     await callback.answer()
 
 
-@F.data.startswith("view_seller:")
+@admin_router.callback_query(F.data.startswith("view_seller:"))
 async def view_seller_details(callback: types.CallbackQuery):
     """Tanlangan sotuvchi uchun maxsus menyu chiqarish."""
     if not is_admin(callback.from_user.id): return
@@ -388,7 +395,7 @@ async def view_seller_details(callback: types.CallbackQuery):
     await callback.answer()
     
 
-@F.data.startswith("seller_password_view:")
+@admin_router.callback_query(F.data.startswith("seller_password_view:"))
 async def view_single_password(callback: types.CallbackQuery):
     """Tanlangan sotuvchining parolini chiqarish."""
     if not is_admin(callback.from_user.id): return
@@ -407,46 +414,19 @@ async def view_single_password(callback: types.CallbackQuery):
 
 # --- V. HANDLERLARNI ULASH FUNKSIYASI ---
 
-# admin_handlers.py da: V. HANDLERLARNI ULASH FUNKSIYASI
+# --- V. HANDLERLARNI ULASH FUNKSIYASI ---
 
 def setup_admin_handlers(dp: Dispatcher):
-    """Barcha admin handlerlarini Dispatcher ga ro'yxatdan o'tkazish."""
-    # Start
-    dp.message.register(command_start_handler, CommandStart())
-    
-    # Mahsulotlar
-    dp.message.register(handle_mahsulot, F.text == "/mahsulot")
-    dp.callback_query.register(list_products, F.data == "list_products")
-    dp.callback_query.register(start_add_product, F.data == "add_new_product")
-    dp.message.register(process_product_name, ProductForm.waiting_for_product_name)
-    dp.message.register(process_product_price, ProductForm.waiting_for_product_price)
-    
-    # Sotuvchilar (Menyu va Yangi Sotuvchi)
-    dp.message.register(handle_sotuvchi, F.text == "/sotuvchi")
-    dp.callback_query.register(start_add_seller, F.data == "add_new_seller")
-    dp.message.register(process_seller_name, SellerForm.waiting_for_name)
-    dp.message.register(process_seller_region, SellerForm.waiting_for_region)
-    dp.message.register(process_seller_phone, SellerForm.waiting_for_phone)
-    dp.message.register(process_seller_password, SellerForm.waiting_for_password)
-
-    # Sotuvchilar Ro'yxati Navigatsiyasi (Yangi Qo'shilganlar)
-    dp.callback_query.register(list_all_sellers_menu, F.data == "list_all_sellers_menu")
-    dp.callback_query.register(list_all_passwords, F.data == "list_all_passwords")
-    dp.callback_query.register(list_all_sellers, F.data == "list_all_sellers")
-    dp.callback_query.register(view_seller_details, F.data.startswith("view_seller:"))
-    dp.callback_query.register(view_single_password, F.data.startswith("seller_password_view:"))
-
-    dp.callback_query.register(view_seller_stock, F.data.startswith("seller_stock:"))
-    
-    # Tovar Berish (Stock Issue)
-    dp.callback_query.register(start_issue_stock, F.data.startswith("issue_stock:"))
-    dp.message.register(process_stock_name, StockIssueForm.waiting_for_product_name)
-    dp.message.register(process_new_product_price, StockIssueForm.waiting_for_new_product_price)
-    dp.message.register(process_stock_quantity, StockIssueForm.waiting_for_quantity)
-
+    """Barcha admin handlerlarini Dispatcher ga ro'yxatdan o'tkazish.
+    Aiogram 3.x usulida, barcha handlerlar admin_router ichida dekoratorlar orqali
+    aniqlangan bo'lishi kerak.
+    """
+    # Faqat Router ni Dispatcher ga ulaymiz.
+    # dp.message.register() kabi eski usullar to'liq olib tashlandi.
+    dp.include_router(admin_router)
 # admin_handlers.py da: Qo'shilgan yangi funksiya
 
-@F.data.startswith("seller_stock:")
+@admin_router.callback_query(F.data.startswith("seller_stock:"))
 async def view_seller_stock(callback: types.CallbackQuery):
     """Sotuvchining jami stokini Sheetsdan olib chiqarish."""
     if not is_admin(callback.from_user.id): return
