@@ -42,12 +42,17 @@ def is_admin(user_id):
     admin_ids = [int(i.strip()) for i in admin_ids_str if i.strip().isdigit()]
     return user_id in admin_ids
 
-@CommandStart()
+# admin_handlers.py
+# ... boshqa funksiyalar va FSMlar
+
+# @CommandStart() # DEKORATORNI O'CHIRDIK!
 async def command_start_handler(message: types.Message):
     """/start buyrug'i uchun ishlov beruvchi."""
     if not is_admin(message.from_user.id):
         await message.answer("Siz administrator emassiz. Ruxsat yo'q.")
         return
+
+    # ... qolgan mantiq
 
     keyboard = types.ReplyKeyboardMarkup(
         keyboard=[
