@@ -1,4 +1,4 @@
-# server.py fayli (Render Webhook uchun moslashtirilgan)
+# server.py fayli (Render Webhook uchun eng barqaror yechim)
 
 import asyncio
 import logging
@@ -27,11 +27,8 @@ ADMIN_IDS = [int(i.strip()) for i in ADMIN_IDS_STR if i.strip().isdigit()]
 
 # Render uchun muhim Webhook sozlamalari
 WEB_SERVER_HOST = "0.0.0.0"
-# Render avtomatik ravishda PORT ENV'ni beradi
 WEB_SERVER_PORT = int(os.environ.get("PORT", 8080)) 
 WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
-
-# Buni Render Env Variables'iga kiritishingiz kerak
 BASE_WEBHOOK_URL = os.environ.get("WEBHOOK_BASE_URL") 
 
 
@@ -55,16 +52,13 @@ if dp:
     setup_seller_handlers(dp)
 
 
-# --- IV. WEBHOOK STARTUP VA SHUTDOWN FUNKSIYALARI ---
-
+# --- IV. WEBHOOK STARTUP FUNKSIYASI ---
 async def on_startup(bot: Bot):
     """Veb-server ishga tushganda bajariladigan amallar."""
     
     # 1. Google Sheets Credentialsni sozlash
     if not setup_gspread_credentials():
         logging.error("Google Sheets credentials sozlanmadi! Bot ishlamaydi.")
-        # Agar credentials topilmasa, botni ishga tushirmaslik uchun xatolik ko'rsatamiz
-        # Ammo aiohttp serverini to'xtatish murakkab, shuning uchun faqat log yozamiz.
         return 
         
     logging.info("Credentials muvaffaqiyatli sozlandi.")
@@ -110,31 +104,43 @@ async def main():
     # Aiohttp serverini sozlash
     app = web.Application()
     
-    # Aiogram handlerini o'rnatish
-    request_handler = SimpleRequestHandler(
+    # Request Handler'ni o'rnatish
+    webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
-        secret_token=BOT_TOKEN, # Xavfsizlik uchun
+        secret_token=BOT_TOKEN, 
     )
     
-    # Webhook yo'lini o'rnatish
-    request_handler.register(app, path=WEBHOOK_PATH)
+    # Webhook yo'lini o'rnatish (masalan: /webhook/BOT_TOKEN)
+    webhook_requests_handler.register(app, path=WEBHOOK_PATH)
 
-    # Serverni sozlash va ishga tushirish
+    # Dispatcher va Botni app'ga ulash (setup_application)
     setup_application(app, dp, bot=bot)
-    logging.info(f"Veb-server ishga tushirilmoqda. Port: {WEB_SERVER_PORT}")
     
-    await web.run_app(app, host=WEB_SERVER_HOST, port=WEB_SERVER_PORT)
+    # MUHIM O'ZGARTIRISH: Serverni to'g'ri ishga tushirish va bloklash.
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, WEB_SERVER_HOST, WEB_SERVER_PORT)
+    await site.start()
+    
+    logging.info(f"Veb-server ishga tushirildi. Host: {WEB_SERVER_HOST}, Port: {WEB_SERVER_PORT}")
+
+    # Serverni cheksiz ishlashini ta'minlash (Render uchun talab qilinadi)
+    await asyncio.Event().wait()
 
 
 if __name__ == "__main__":
-    # Ogohlantirish (faqat agar Admin ID o'rnatilmagan bo'lsa)
+    # Ogohlantirish
     if 123456789 in ADMIN_IDS:
         print("\n!!! ESLATMA: Iltimos, ADMIN_IDS ni o'zingizning Telegram ID raqamingizga o'zgartiring. !!!\n")
         
     try:
-        asyncio.run(main())
+        # Loopni qo'lda boshqarish uchun run_until_complete ishlatiladi, bu barqarorroq.
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(main())
+        
     except KeyboardInterrupt:
         logging.info("Bot to'xtatildi")
     except Exception as e:
-        logging.error(f"Botda kutilmagan xato: {e}")
+        # Xatolarni to'liq ko'rish uchun tracback ni yozish
+        logging.error(f"Botda kutilmagan xato: {e}", exc_info=True)
