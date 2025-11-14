@@ -100,8 +100,8 @@ def get_all_sellers():
 def get_seller_name_by_id(seller_id):
     """Sotuvchi IDsi bo'yicha uning Ismini (Name) qaytaradi (Varq sarlavhalari uchun)."""
     seller_row = get_seller_by_id(seller_id)
-    # Sotuvchi Ismi 2-indeksda joylashgan: [ID, Sana, Ism, ...]
-    return seller_row[2] if seller_row and len(seller_row) > 2 else str(seller_id)
+    # Sotuvchi Ismi 1-indeksda joylashgan: [ID, Ism, Tuman, Telefon, Parol, Sana]
+    return seller_row[1] if seller_row and len(seller_row) > 1 else str(seller_id)
 
 def add_seller(seller_data):
     """Yangi sotuvchini Sheetsga qo'shadi (Admin FSM)."""
@@ -112,20 +112,22 @@ def add_seller(seller_data):
         worksheet = get_or_create_worksheet(
             spreadsheet, 
             SHEET_NAMES["SELLERS"], 
-            header_row=["ID", "Sana", "Ism", "Mahalla", "Telefon", "Parol"]
+            # YANGILANGAN: "Mahalla" o'rniga "Tuman" ishlatildi va Sana oxirda
+            header_row=["ID", "Ism", "Tuman", "Telefon", "Parol", "Sana"] 
         )
         
         current_rows = worksheet.get_all_values()
         new_id = len(current_rows) # Yangi IDni aniqlash
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M")
         
+        # YANGILANGAN: Ma'lumotlar tartibi yangi sarlavhaga moslandi
         new_row = [
             new_id, 
-            current_date,
             seller_data['seller_name'], 
-            seller_data['seller_region'], 
+            seller_data['seller_region'], # seller_region ma'lumoti Tuman ustuniga yoziladi
             seller_data['seller_phone'], 
-            seller_data['seller_password']
+            seller_data['seller_password'], 
+            current_date
         ]
         
         worksheet.append_row(new_row)
@@ -161,9 +163,9 @@ def get_seller_by_password(password):
         worksheet = spreadsheet.worksheet(SHEET_NAMES["SELLERS"])
         all_sellers = worksheet.get_all_values()[1:]
         
-        # Parol 5-indeksda joylashgan
+        # Parol 4-indeksda joylashgan: [ID, Ism, Tuman, Telefon, Parol, Sana]
         for row in all_sellers:
-            if len(row) >= 6 and row[5] == str(password):
+            if len(row) >= 5 and row[4] == str(password):
                 return row
         return None
     except Exception as e:
@@ -282,7 +284,7 @@ def add_stock_to_seller(seller_id, product_id, quantity, price):
         worksheet = get_or_create_worksheet(
             spreadsheet, 
             SHEET_NAMES["STOCK"], 
-            # YANGILANGAN: Soni -> Kilogrammi, Birlik Narxi -> Narxi
+            # Sarlavha: Kilogrammi, Narxi, Sana oxirida
             header_row=["ID", "Sotuvchi", "Mahsulot ID", "Kilogrammi", "Narxi", "Jami Narx", "Sana"]
         )
         
@@ -360,7 +362,7 @@ def add_sale(seller_id, product_id, quantity, price):
         worksheet = get_or_create_worksheet(
             spreadsheet, 
             SHEET_NAMES["SALES"], 
-            # YANGILANGAN: Sana oxiriga o'tdi, Soni -> Kilogrammi, Birlik Narxi -> Narxi
+            # Sarlavha: Kilogrammi, Narxi, Sana oxirida
             header_row=["ID", "Sotuvchi", "Mahsulot ID", "Kilogrammi", "Narxi", "Jami Tushum", "Sana"]
         )
         
