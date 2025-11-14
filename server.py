@@ -11,7 +11,7 @@ from aiogram.methods import DeleteWebhook, SetWebhook
 from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-# Handlerlar va API dan importlar
+# Handlerlar va API dan importlar (Loyihangizdagi fayllar)
 from admin_handlers import setup_admin_handlers
 from seller_handlers import setup_seller_handlers
 from sheets_api import setup_gspread_credentials
@@ -25,10 +25,13 @@ BOT_TOKEN = os.environ.get('BOT_TOKEN')
 ADMIN_IDS_STR = os.environ.get('ADMIN_IDS', '').split(',')
 ADMIN_IDS = [int(i.strip()) for i in ADMIN_IDS_STR if i.strip().isdigit()]
 
+# Xavfsizlik tokeni (BOT_TOKENdan alohida bo'lishi kerak)
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", None) 
+
 # Render uchun muhim Webhook sozlamalari
 WEB_SERVER_HOST = "0.0.0.0"
 WEB_SERVER_PORT = int(os.environ.get("PORT", 8080)) 
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}" # URL path bot tokeni orqali unique qilinadi
 BASE_WEBHOOK_URL = os.environ.get("WEBHOOK_BASE_URL") 
 
 
@@ -36,6 +39,8 @@ if not BOT_TOKEN:
     logging.error("BOT_TOKEN Env Variablesida topilmadi! Bot ishga tushmaydi.")
 if not BASE_WEBHOOK_URL:
     logging.error("WEBHOOK_BASE_URL Env Variablesida topilmadi! Webhook ishlamaydi.")
+if not WEBHOOK_SECRET: 
+    logging.error("WEBHOOK_SECRET Env Variablesida topilmadi! Webhook xavfsiz bo'lmaydi.")
 
 
 # --- II. BOT VA DISPATCHERNI YARATISH ---
@@ -52,7 +57,7 @@ if dp:
     setup_seller_handlers(dp)
 
 
-# --- IV. WEBHOOK STARTUP FUNKSIYASI ---
+# --- IV. WEBHOOK STARTUP VA SHUTDOWN FUNKSIYALARI ---
 async def on_startup(bot: Bot):
     """Veb-server ishga tushganda bajariladigan amallar."""
     
@@ -66,11 +71,11 @@ async def on_startup(bot: Bot):
     # 2. Telegramga Webhook URLni o'rnatish
     webhook_url = f"{BASE_WEBHOOK_URL}{WEBHOOK_PATH}"
     
-    # Oldingi long pollingni o'chirish (Agar mavjud bo'lsa)
+    # Oldingi long pollingni o'chirish
     await bot(DeleteWebhook(drop_pending_updates=True)) 
     
-    # Yangi Webhook o'rnatish (secret_token qo'shildi)
-    await bot.set_webhook(url=webhook_url, secret_token=BOT_TOKEN) 
+    # Yangi Webhook o'rnatish, WEBHOOK_SECRET bilan birga
+    await bot.set_webhook(url=webhook_url, secret_token=WEBHOOK_SECRET) 
     
     logging.info(f"Webhook muvaffaqiyatli o'rnatildi: {webhook_url}")
 
@@ -83,8 +88,8 @@ async def on_shutdown(bot: Bot):
 
 # --- V. ASOSIY WEBHOOK ISHGA TUSHIRISH FUNKSIYASI ---
 async def main():
-    if not bot or not dp or not BASE_WEBHOOK_URL:
-        print("\nBot ishga tushirilmadi. Token/Base URL xato.\n")
+    if not bot or not dp or not BASE_WEBHOOK_URL or not WEBHOOK_SECRET: 
+        print("\nBot ishga tushirilmadi. Kerakli Env Variables topilmadi.\n")
         return
         
     logging.info("--- Webhook rejimida ishga tushirish boshlandi ---")
@@ -109,16 +114,16 @@ async def main():
     webhook_requests_handler = SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
-        secret_token=BOT_TOKEN, 
+        secret_token=WEBHOOK_SECRET, # Secretni tekshirish uchun ishlatiladi
     )
     
-    # Webhook yo'lini o'rnatish (masalan: /webhook/BOT_TOKEN)
+    # Webhook yo'lini o'rnatish 
     webhook_requests_handler.register(app, path=WEBHOOK_PATH)
 
-    # Dispatcher va Botni app'ga ulash (setup_application)
+    # Dispatcher va Botni app'ga ulash 
     setup_application(app, dp, bot=bot)
     
-    # MUHIM O'ZGARTIRISH: Serverni to'g'ri ishga tushirish va bloklash.
+    # Serverni to'g'ri ishga tushirish va Event Loop bilan aralashmaslik
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, WEB_SERVER_HOST, WEB_SERVER_PORT)
@@ -126,7 +131,7 @@ async def main():
     
     logging.info(f"Veb-server ishga tushirildi. Host: {WEB_SERVER_HOST}, Port: {WEB_SERVER_PORT}")
 
-    # Serverni cheksiz ishlashini ta'minlash (Render uchun talab qilinadi)
+    # Serverni cheksiz ishlashini ta'minlash (Render uchun muhim)
     await asyncio.Event().wait()
 
 
@@ -136,12 +141,12 @@ if __name__ == "__main__":
         print("\n!!! ESLATMA: Iltimos, ADMIN_IDS ni o'zingizning Telegram ID raqamingizga o'zgartiring. !!!\n")
         
     try:
-        # Loopni qo'lda boshqarish uchun run_until_complete ishlatiladi, bu barqarorroq.
+        # Event Loop'ni boshqarishning barqaror usuli
         loop = asyncio.get_event_loop()
         loop.run_until_complete(main())
         
     except KeyboardInterrupt:
         logging.info("Bot to'xtatildi")
     except Exception as e:
-        # Xatolarni to'liq ko'rish uchun tracback ni yozish
+        # Kutilmagan xatolarni logga yozish
         logging.error(f"Botda kutilmagan xato: {e}", exc_info=True)
