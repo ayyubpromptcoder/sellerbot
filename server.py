@@ -69,8 +69,9 @@ async def on_startup(bot: Bot):
     # Oldingi long pollingni o'chirish (Agar mavjud bo'lsa)
     await bot(DeleteWebhook(drop_pending_updates=True)) 
     
-    # Yangi Webhook o'rnatish
-    await bot.set_webhook(url=webhook_url)
+    # Yangi Webhook o'rnatish (secret_token qo'shildi)
+    await bot.set_webhook(url=webhook_url, secret_token=BOT_TOKEN) 
+    
     logging.info(f"Webhook muvaffaqiyatli o'rnatildi: {webhook_url}")
 
 async def on_shutdown(bot: Bot):
