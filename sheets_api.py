@@ -99,9 +99,21 @@ def get_all_sellers():
 
 def get_seller_name_by_id(seller_id):
     """Sotuvchi IDsi bo'yicha uning Ismini (Name) qaytaradi (Varq sarlavhalari uchun)."""
-    seller_row = get_seller_by_id(seller_id)
-    # Sotuvchi Ismi 1-indeksda joylashgan: [ID, Ism, Tuman, Telefon, Parol, Sana]
-    return seller_row[1] if seller_row and len(seller_row) > 1 else str(seller_id)
+    spreadsheet = get_sheets_client()
+    if not spreadsheet: return str(seller_id)
+    
+    try:
+        worksheet = spreadsheet.worksheet(SHEET_NAMES["SELLERS"])
+        all_sellers = worksheet.get_all_values()[1:] 
+        
+        # Sotuvchi IDsi 0-indeksda, Ismi 1-indeksda joylashgan: [ID, Ism, Tuman, Telefon, Parol, Sana]
+        for row in all_sellers:
+            if len(row) > 1 and row[0] == str(seller_id):
+                return row[1]
+        return str(seller_id) # Agar topilmasa IDni qaytarish
+    except Exception as e:
+        logging.error(f"Sotuvchi nomini olishda xato: {e}")
+        return str(seller_id)
 
 def add_seller(seller_data):
     """Yangi sotuvchini Sheetsga qo'shadi (Admin FSM)."""
@@ -112,7 +124,7 @@ def add_seller(seller_data):
         worksheet = get_or_create_worksheet(
             spreadsheet, 
             SHEET_NAMES["SELLERS"], 
-            # YANGILANGAN: "Mahalla" o'rniga "Tuman" ishlatildi va Sana oxirda
+            # "Mahalla" o'rniga "Tuman" ishlatildi va Sana oxirda
             header_row=["ID", "Ism", "Tuman", "Telefon", "Parol", "Sana"] 
         )
         
@@ -120,11 +132,11 @@ def add_seller(seller_data):
         new_id = len(current_rows) # Yangi IDni aniqlash
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M")
         
-        # YANGILANGAN: Ma'lumotlar tartibi yangi sarlavhaga moslandi
+        # Ma'lumotlar tartibi yangi sarlavhaga moslandi
         new_row = [
             new_id, 
             seller_data['seller_name'], 
-            seller_data['seller_region'], # seller_region ma'lumoti Tuman ustuniga yoziladi
+            seller_data['seller_region'], # Region qiymati Tuman ustuniga yoziladi
             seller_data['seller_phone'], 
             seller_data['seller_password'], 
             current_date
@@ -261,6 +273,7 @@ def get_product_name_by_id(product_id):
         worksheet = spreadsheet.worksheet(SHEET_NAMES["PRODUCTS"])
         all_products = worksheet.get_all_values()[1:] 
 
+        # ID 0-indeksda, Nomi 1-indeksda
         for row in all_products:
             if row and row[0] == str(product_id):
                 return row[1] 
@@ -281,21 +294,25 @@ def add_stock_to_seller(seller_id, product_id, quantity, price):
     if not spreadsheet: return False
     
     try:
+        # Mahsulot va Sotuvchi nomlarini olish
+        seller_name = get_seller_name_by_id(seller_id)
+        product_name = get_product_name_by_id(product_id)
+        
         worksheet = get_or_create_worksheet(
             spreadsheet, 
             SHEET_NAMES["STOCK"], 
-            # Sarlavha: Kilogrammi, Narxi, Sana oxirida
-            header_row=["ID", "Sotuvchi", "Mahsulot ID", "Kilogrammi", "Narxi", "Jami Narx", "Sana"]
+            # YANGILANGAN SARLAVHA: IDlar o'rniga Ism va Nomi
+            header_row=["ID", "Sotuvchi Ismi", "Mahsulot Nomi", "Kilogrammi", "Narxi", "Jami Narx", "Sana"]
         )
         
         total_price = float(price) * int(quantity)
         current_date = datetime.now().strftime("%Y-%m-%d %H:%M")
         
-        # Qator tuzilishi: [ID, Sotuvchi ID (1), Mahsulot ID (2), Kilogrammi (3), Narxi (4), Jami Narx (5), Sana (6)]
+        # Qator tuzilishi: [ID, Sotuvchi Ismi (1), Mahsulot Nomi (2), Kilogrammi (3), Narxi (4), Jami Narx (5), Sana (6)]
         new_row = [
             "", # ID 
-            seller_id, 
-            product_id, 
+            seller_name,    # Nom kiritildi
+            product_name,   # Nom kiritildi
             quantity,  
             price,     
             total_price,
@@ -317,16 +334,24 @@ def get_seller_stock(seller_id):
         worksheet = spreadsheet.worksheet(SHEET_NAMES["STOCK"])
         all_stock = worksheet.get_all_values()[1:] 
         
-        # Row formati: [ID(0), Sotuvchi ID(1), Mahsulot ID(2), Kilogrammi(3), Narxi(4), Jami Narx(5), Sana(6)]
+        # Sotuvchi IDsi bo'yicha nomni olish
+        seller_name = get_seller_name_by_id(seller_id)
+        if not seller_name or seller_name == str(seller_id):
+             logging.warning(f"ID {seller_id} uchun sotuvchi nomi topilmadi. Filtrlanmasdan qaytariladi.")
+             # Agar ism topilmasa, bo'sh qaytarish mantiqiyroq
+             return None 
+
+        # Yangi Row formati: [ID(0), Sotuvchi Ismi(1), Mahsulot Nomi(2), Kilogrammi(3), Narxi(4), Jami Narx(5), Sana(6)]
         
-        # 1. Tanlangan sotuvchining tovarlarini filtrlash
-        seller_stock = [row for row in all_stock if len(row) > 1 and row[1] == str(seller_id)]
+        # 1. Tanlangan sotuvchining tovarlarini filtrlash (Ism bo'yicha filtrlash)
+        # Sotuvchi Ismi 1-indeksda joylashgan
+        seller_stock = [row for row in all_stock if len(row) > 1 and row[1] == seller_name]
         
         if not seller_stock:
             return None
 
-        # 2. Mahsulot ID si bo'yicha guruhlash va Kilogrammini hisoblash
-        seller_stock.sort(key=lambda x: x[2]) # Mahsulot ID 2-indeksda
+        # 2. Mahsulot Nomi (index 2) bo'yicha guruhlash va Kilogrammini hisoblash
+        seller_stock.sort(key=lambda x: x[2]) 
         
         grouped_stock = {}
         for key, group in itertools.groupby(seller_stock, key=lambda x: x[2]):
@@ -341,6 +366,7 @@ def get_seller_stock(seller_id):
             
             # Faqat musbat sonli tovarlarni qaytarish
             if total_quantity > 0:
+                # Key Mahsulot Nomi bo'ladi
                 grouped_stock[key] = (total_quantity, price) 
             
         return grouped_stock
@@ -350,7 +376,7 @@ def get_seller_stock(seller_id):
         return None
 
 # ==============================================================================
-# V. SAVDO (SALES) FUNKSIYALARI
+# V. SAVDO (SALES) FUNKSIYALARI (IDlar bilan qoldirildi)
 # ==============================================================================
 
 def add_sale(seller_id, product_id, quantity, price):
@@ -362,7 +388,7 @@ def add_sale(seller_id, product_id, quantity, price):
         worksheet = get_or_create_worksheet(
             spreadsheet, 
             SHEET_NAMES["SALES"], 
-            # Sarlavha: Kilogrammi, Narxi, Sana oxirida
+            # SAVDO VARAG'I IDlar bilan qoldi, chunki u hisobotlar uchun muhim
             header_row=["ID", "Sotuvchi", "Mahsulot ID", "Kilogrammi", "Narxi", "Jami Tushum", "Sana"]
         )
         
@@ -420,20 +446,20 @@ def get_seller_sales_summary(seller_id, start_date=None, end_date=None):
         worksheet = spreadsheet.worksheet(SHEET_NAMES["SALES"])
         all_sales = worksheet.get_all_values()[1:]
         
-        # Yangi Row formati: [ID(0), Sotuvchi(1), Mahsulot ID(2), Kilogrammi(3), Narxi(4), Jami Tushum(5), Sana(6)]
+        # Savdo Row formati IDlar bilan: [ID(0), Sotuvchi ID(1), Mahsulot ID(2), Kilogrammi(3), Narxi(4), Jami Tushum(5), Sana(6)]
         
         for row in all_sales:
-            if len(row) < 7: # Endi kamida 7 ustun bo'lishi kerak
+            if len(row) < 7: 
                 continue
 
-            current_seller_id = row[1] # Sotuvchi ID endi 1-indeksda
-            sale_date_str = row[6]      # Sana endi 6-indeksda (oxirida)
+            current_seller_id = row[1] # Sotuvchi ID 1-indeksda
+            sale_date_str = row[6]      # Sana 6-indeksda
             
-            # 1. Sotuvchini filtrlash
+            # 1. Sotuvchini filtrlash (ID bo'yicha)
             if current_seller_id != str(seller_id):
                 continue
 
-            # 2. Sanani filtrlash (Agar start_dt yoki end_dt berilgan bo'lsa)
+            # 2. Sanani filtrlash
             sale_dt = parse_date(sale_date_str)
             if sale_dt:
                 if start_dt and sale_dt < start_dt:
@@ -443,8 +469,8 @@ def get_seller_sales_summary(seller_id, start_date=None, end_date=None):
             
             # 3. Hisoblash
             try:
-                quantity = int(row[3]) # Kilogrammi endi 3-indeksda
-                revenue = float(row[5]) # Jami Tushum endi 5-indeksda
+                quantity = int(row[3]) # Kilogrammi 3-indeksda
+                revenue = float(row[5]) # Jami Tushum 5-indeksda
                 
                 total_quantity += quantity
                 total_revenue += revenue
