@@ -320,7 +320,7 @@ def get_seller_stock(seller_id):
         # Row formati: [ID(0), Sotuvchi ID(1), Mahsulot ID(2), Kilogrammi(3), Narxi(4), Jami Narx(5), Sana(6)]
         
         # 1. Tanlangan sotuvchining tovarlarini filtrlash
-        seller_stock = [row for row in all_stock if len(row) > 1 and row[1] == str(seller_id)]
+        seller_stock = [row for row in all_stock if len(row) > 1 and row[1] == str(seller_name)]
         
         if not seller_stock:
             return None
