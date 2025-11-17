@@ -169,7 +169,7 @@ async def start_add_seller(callback: types.CallbackQuery, state: FSMContext):
 @admin_router.message(SellerForm.waiting_for_name) # <- O'zgardi
 async def process_seller_name(message: types.Message, state: FSMContext):
     await state.update_data(seller_name=message.text)
-    await message.answer("Sotuvchining **Mahallasini** kiriting:")
+    await message.answer("Sotuvchining **Tumanini** kiriting:")
     await state.set_state(SellerForm.waiting_for_region)
 
 @admin_router.message(SellerForm.waiting_for_region) # <- O'zgardi
